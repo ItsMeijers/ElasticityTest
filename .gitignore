@@ -19,3 +19,5 @@ target/
 .ensime_cache
 TestResults/
 Results/
+log
+*.log
