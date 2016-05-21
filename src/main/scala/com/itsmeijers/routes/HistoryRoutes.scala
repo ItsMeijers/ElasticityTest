@@ -13,7 +13,7 @@ import scala.concurrent.ExecutionContext.Implicits.global
 import com.itsmeijers.utils._
 import spray.json._
 
-trait HistoryRoutes extends JsonSupport with FileSaving with CorsSupport{
+trait HistoryRoutes extends JsonSupport with FileSaving {
 
   private implicit val timeout = Timeout(4 seconds)
 

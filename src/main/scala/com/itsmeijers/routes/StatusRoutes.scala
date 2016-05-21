@@ -12,13 +12,13 @@ import akka.stream.scaladsl._
 trait StatusRoutes {
 
   def test(implicit materializer: ActorMaterializer) : Flow[Message, Message, Any] =
-  Flow[Message].mapConcat {
-    case tm: TextMessage ⇒
-      TextMessage(Source.single("Hello ") ++ tm.textStream ++ Source.single("!")) :: Nil
-    case bm: BinaryMessage ⇒
+  Flow[Message].map {
+    case tm: TextMessage.Strict =>
+      TextMessage(s"Echo: ${tm.text}")
+    case bm: BinaryMessage =>
       // ignore binary messages but drain content to avoid the stream being clogged
       bm.dataStream.runWith(Sink.ignore)
-      Nil
+      TextMessage("Unsupported message!")
   }
 
   //def updater: ActorRef
@@ -31,6 +31,7 @@ trait StatusRoutes {
         }
       }
     } ~ path("current") {
+      println("Websocket connection requested!")
       // Websocket
        handleWebSocketMessages(test)
     }

@@ -18,7 +18,7 @@ class RequestScheduler(val elasticityTest: ElasticityTest)
 
   def initIntervalQueue: IntervalQueue = IntervalQueue(
     elasticityTest.requestWithInterval.map {
-      case (httpRequest: HttpRequest, queue: Queue[(Int, Int)]) =>
+      case (httpRequest: HttpRequest, queue: Queue[(Double, Int)]) =>
         val ((firstInterval, intervalCount), newQueue) = queue.dequeue
 
         val httpRequester = context.actorOf(HttpRequester.props(
@@ -84,7 +84,7 @@ class RequestScheduler(val elasticityTest: ElasticityTest)
   def shutdownHttpRequesters(stateData: RequestSchedulerData): Unit =
     stateData match {
       case IntervalQueue(httpInfo) =>
-        httpInfo foreach { case (ar: ActorRef, _: HttpRequest, _: Queue[(Int, Int)]) =>
+        httpInfo foreach { case (ar: ActorRef, _: HttpRequest, _: Queue[(Double, Int)]) =>
           log.debug(s"Shutting down $ar")
           ar ! PoisonPill
         }
@@ -99,7 +99,7 @@ class RequestScheduler(val elasticityTest: ElasticityTest)
   def nextIntervalQueue(intervalQueue: IntervalQueue): Try[IntervalQueue] =
     Try {
       IntervalQueue(intervalQueue.httpInfo.map {
-        case (ar: ActorRef, hr: HttpRequest, q: Queue[(Int, Int)]) =>
+        case (ar: ActorRef, hr: HttpRequest, q: Queue[(Double, Int)]) =>
           val ((interval, intervalCount), newQueue) = q.dequeue
           val newRequester = context.actorOf(HttpRequester.props(
             elasticityTest,
@@ -137,7 +137,7 @@ object RequestScheduler {
   // All possible data state changes
   sealed trait RequestSchedulerData
   // Data for creating the interval for each HttpRequester (ActorRef)
-  final case class IntervalQueue(httpInfo: Seq[(ActorRef, HttpRequest, Queue[(Int, Int)])]) extends RequestSchedulerData
+  final case class IntervalQueue(httpInfo: Seq[(ActorRef, HttpRequest, Queue[(Double, Int)])]) extends RequestSchedulerData
   case object EmptyRequestScheduler extends RequestSchedulerData
 
   // RequestScheduler messages

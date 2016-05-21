@@ -17,7 +17,7 @@ trait ResultsRoutes extends JsonSupport {
   private implicit val timeout = Timeout(4 seconds)
 
   def results(elasticityTester: ActorRef) =
-    path("api" / "results" / Segment) { testName =>
+    path("api" / "result" / Segment) { testName =>
       get {
         complete{
           (elasticityTester ? RetrieveResult(testName))

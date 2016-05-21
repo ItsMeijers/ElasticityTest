@@ -26,4 +26,5 @@ libraryDependencies ++= Seq(
   "org.typelevel"        %% "cats"              % "0.4.1",
   "com.github.tototoshi" %% "scala-csv"         % "1.3.1",
   "joda-time"            % "joda-time"          % "2.9.3",
-  "org.joda"             % "joda-convert"       % "1.8.1")
+  "org.joda"             % "joda-convert"       % "1.8.1",
+  "ch.megard"            %% "akka-http-cors"    % "0.1.2")

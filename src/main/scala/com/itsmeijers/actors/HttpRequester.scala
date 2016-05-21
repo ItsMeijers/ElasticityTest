@@ -15,7 +15,7 @@ import com.itsmeijers.models.ElasticityTest
 class HttpRequester(
   val elasticityTest: ElasticityTest,
   val httpRequest: HttpRequest,
-  val interval: Int,
+  val interval: Double,
   val intervalCounter: Int)
     extends Actor
     with ActorLogging {
@@ -37,7 +37,7 @@ class HttpRequester(
     httpRequest)
 
   def calculateRequestsPerSecond: FiniteDuration = {
-    val requestsPerSecond = (1.0 / interval.toDouble * 1000.0).milliseconds
+    val requestsPerSecond = (1.0 / interval * 1000.0).milliseconds
     log.debug(s"Created interval $interval")
     requestsPerSecond
   }
@@ -72,7 +72,7 @@ object HttpRequester {
   def props(
     elasticityTest: ElasticityTest,
     httpRequest: HttpRequest,
-    interval: Int,
+    interval: Double,
     intervalCounter: Int) =
       Props(classOf[HttpRequester], elasticityTest, httpRequest, interval, intervalCounter)
 
