@@ -1,6 +1,6 @@
 package com.itsmeijers
 
-import akka.actor.ActorSystem
+import akka.actor.{ActorRef, Props, ActorSystem}
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.server.Directives._
 import akka.stream.ActorMaterializer
@@ -23,15 +23,20 @@ object ApplicationMain
   with HistoryRoutes
   with FileSaving {
 
-  implicit val system = ActorSystem("ElasticityTest")
+  implicit val system: ActorSystem = ActorSystem("ElasticityTest")
   implicit val actorMaterializer = ActorMaterializer()
   implicit val executionContext = system.dispatcher
+
+  class ExampleActor
+
+
+
 
   val et = system.actorOf(ElasticityTester.props, "elasticityTester")
 
   // All the routes which are in defined individually in each corresponding trait
   val route = cors() {
-    index ~ dsl(et) ~ status ~ results(et) ~ history(et)
+    index ~ dsl(et) ~ status(et) ~ results(et) ~ history(et)
   }
 
   val foldersCreated = createTestFolder() && createResultFolder()

@@ -5,35 +5,50 @@ import akka.http.scaladsl.model.ws._
 import akka.http.scaladsl.server.Directives._
 import akka.stream._
 import akka.stream.scaladsl._
+import akka.actor.ActorRef
+import com.itsmeijers.models.SocketModels._
+import com.itsmeijers.actors.ElasticityTester.{UpdateSocket, SocketStatus}
+import com.itsmeijers.utils.JsonSupport
+import spray.json._
+import akka.pattern.ask
+import scala.concurrent.duration._
+import akka.util.Timeout
+import scala.concurrent.ExecutionContext.Implicits.global
+import scala.concurrent.{Future, Await}
 
 /**
 * Add a socket that communicates with the client during testing
 */
-trait StatusRoutes {
+trait StatusRoutes extends JsonSupport {
 
-  def test(implicit materializer: ActorMaterializer) : Flow[Message, Message, Any] =
+  val duration = 4 seconds
+
+  implicit val timeout = Timeout(duration)
+
+  def test(elasticityTester: ActorRef)(implicit materializer: ActorMaterializer) : Flow[Message, Message, Any] =
   Flow[Message].map {
     case tm: TextMessage.Strict =>
-      TextMessage(s"Echo: ${tm.text}")
-    case bm: BinaryMessage =>
-      // ignore binary messages but drain content to avoid the stream being clogged
-      bm.dataStream.runWith(Sink.ignore)
-      TextMessage("Unsupported message!")
+      val textMessageF = (elasticityTester ? UpdateSocket(tm.text))
+        .mapTo[SocketStatus]
+        .map(ss => TextMessage(ss.currentStatus.toJson.compactPrint))
+
+      Await.result(textMessageF, duration)
+    case _ =>
+      TextMessage(negativeStatus("Unsupported message!").toJson.compactPrint)
   }
 
-  //def updater: ActorRef
-
-  def status(implicit materializer: ActorMaterializer) = pathPrefix("api" / "status") {
-    pathEnd {
-      get {
-        complete {
-          HttpResponse(200, entity = "Status: Idle or Running!")
+  def status(elasticityTester: ActorRef)(implicit materializer: ActorMaterializer) =
+    pathPrefix("api" / "status") {
+      pathEnd {
+        get {
+          complete {
+            HttpResponse(200, entity = "Status: Idle or Running!")
+          }
         }
+      } ~ path("current") {
+        println("Websocket connection requested!")
+        // Websocket
+         handleWebSocketMessages(test(elasticityTester))
       }
-    } ~ path("current") {
-      println("Websocket connection requested!")
-      // Websocket
-       handleWebSocketMessages(test)
     }
-  }
 }

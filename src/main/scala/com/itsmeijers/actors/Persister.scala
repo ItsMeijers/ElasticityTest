@@ -4,7 +4,6 @@ import akka.actor._
 import akka.actor.Status._
 import com.github.tototoshi.csv._
 import HttpRequester.HttpResult
-import com.itsmeijers.models.RequestResult
 import com.itsmeijers.utils.FileSaving
 
 class Persister(
@@ -19,23 +18,10 @@ class Persister(
   // Close file when stopping actor
   override def postStop(): Unit = writer.close()
 
-  // Make a RequestResult into a row of Strings
-  def toRow(requestResult: RequestResult): List[String] =
-    List(requestResult.status, requestResult.startTime, requestResult.endTime)
-
   def receive = {
-    case HttpResult(uri, startTime, httpResponse) =>
-      log.debug(s"Received response with ${httpResponse.status}")
-      val endTime = System.currentTimeMillis().toString
-
-      // Create a RequestResult out of the HttpResult
-      val requestResult = RequestResult(
-        status    = httpResponse.status.intValue.toString,
-        startTime = startTime,
-        endTime   = endTime)
-
+    case HttpResult(uri, startTime, endTime, httpResponse) =>
       // Write RequestResult as a row to the result csv file
-      writer.writeRow(toRow(requestResult))
+      writer.writeRow(List(httpResponse.status.intValue.toString, startTime, endTime))
     case Failure(cause) =>
       // persist failure as a result, counts too
       // TODO

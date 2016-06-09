@@ -16,6 +16,7 @@ import com.itsmeijers.actors.ElasticityTester._
 import com.itsmeijers.utils._
 import scala.collection.immutable.{Queue, Seq}
 import spray.json._
+import akka.http.scaladsl.marshalling.Marshal
 
 trait DSLRoutes extends JsonSupport with FileSaving {
 
@@ -29,15 +30,21 @@ trait DSLRoutes extends JsonSupport with FileSaving {
             (elasticityTester ? IsAvailable).mapTo[ElasticityTestStatus].map {
               case CurrentlyAvailable =>
               formToElasticityTest(etForm).fold(
-                errors => HttpResponse(400, entity = errors.mkString(" , ")),
+                errors => Marshal(400 ->errors.mkString(" , ")).to[HttpResponse],
                 elasticityTest => {
+                  // start test
                   elasticityTester ! Test(elasticityTest)
-                  HttpResponse(201, entity = elasticityTest.name)
+                  //
+                  val creationResponse = CreationResponse(
+                    testName = elasticityTest.name,
+                    totalDuration = (elasticityTest.totalDuration.toString.takeWhile(_ != ' ').toInt * 60) + 60
+                  )
+                  Marshal(201 -> creationResponse).to[HttpResponse]
                 }
               )
-              case _ => HttpResponse(400, entity = "Already running an Elasticity Test")
+              case _ => Marshal(400 -> "Already running an Elasticity Test").to[HttpResponse]
             } recover {
-              case xs: Exception => HttpResponse(400, entity = xs.getMessage)
+              case xs: Exception => Marshal(400 -> xs.getMessage).to[HttpResponse]
             }
           }
         }

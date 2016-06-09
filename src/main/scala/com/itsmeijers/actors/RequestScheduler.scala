@@ -47,14 +47,14 @@ class RequestScheduler(val elasticityTest: ElasticityTest)
         case Failure(_)   => goto(Finished) using(EmptyRequestScheduler)
         case Success(iq) => goto(Requesting) using(iq)
       }
-    case Event(CurrentPercentage, intervalQueue: IntervalQueue) =>
-      stay() replying(getPercentage(intervalQueue))
+    case Event(TimeLeft, intervalQueue: IntervalQueue) =>
+      stay() replying(getTimeLeft(intervalQueue))
   }
 
   // Processing messages when Finished
   when(Finished) {
-    case Event(CurrentPercentage, EmptyRequestScheduler) =>
-      stay() replying(100.0)
+    case Event(TimeLeft, EmptyRequestScheduler) =>
+      stay() replying(20) // 20 seconds for aggregating and saving
   }
 
   // Processing unhandled messages
@@ -112,14 +112,13 @@ class RequestScheduler(val elasticityTest: ElasticityTest)
     }
 
   /*
-  * Calculates how far the RequestScheduler is based on the lenght of the original
-  * queue and the current queue
+  * TODO
   */
-  def getPercentage(intervalQueue: IntervalQueue): Double = {
-    val total = elasticityTest.requestWithInterval.head._2.length.toDouble
+  def getTimeLeft(intervalQueue: IntervalQueue): Double = {
+    val total = elasticityTest.totalDuration.toString.takeWhile(_ != ' ').toDouble
     val current = intervalQueue.httpInfo.head._3.length.toDouble
 
-    ((total - current) / current) * 100
+    total - current
   }
 
 }
@@ -142,7 +141,7 @@ object RequestScheduler {
 
   // RequestScheduler messages
   sealed trait RequestSchedulerMessage
-  case object CurrentPercentage extends RequestSchedulerMessage
+  case object TimeLeft extends RequestSchedulerMessage
   case object NextInterval extends RequestSchedulerMessage
   final case class ScheduleStopped(cancelled: Boolean) extends RequestSchedulerMessage
 

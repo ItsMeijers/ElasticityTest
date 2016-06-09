@@ -23,11 +23,19 @@ class ResultCalculator extends Actor with ActorLogging {
 
          val times = statusWithTimes.map(_._2)
 
+         val standardDeviation = {
+           val length = times.length.toDouble
+           val average = times.sum.toDouble / length
+           Math.sqrt(times.map(t => Math.pow(t - average, 2)).sum / (length - 1))
+         }
+
+         val averageResponseTime = times.sum / times.length
+
          SingleStatusResult(
            status = status,
-           averageResponseTime = times.sum / times.length,
-           maxResponseTime = times.max,
-           minResponseTime = times.min,
+           averageResponseTime = averageResponseTime,
+           maxResponseTime = averageResponseTime + standardDeviation,
+           minResponseTime = averageResponseTime - standardDeviation,
            numberOfResponses = times.length
          )
        }.toVector

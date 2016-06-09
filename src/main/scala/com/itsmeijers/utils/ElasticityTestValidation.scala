@@ -20,6 +20,8 @@ object ElasticityTestValidation {
 
   type URIS = Seq[(HttpRequest, Queue[(Double, Int)])]
 
+  def invalidE[A](msg: String): EValidated[A] = invalid(List(msg))
+
   def toElasticityTest(etf: ElasticityTestForm): EValidated[ElasticityTest] =
     (validateName(etf.testName) |@|
     valid(new DateTime().toString("MM/dd/yyyy HH:mm")) |@|
@@ -84,12 +86,14 @@ object ElasticityTestValidation {
     else {
       val stepSizes: Seq[Double] = interval
         .zip(interval.tail)
-        .map { case (start, end) => (end.toDouble - start.toDouble) / intervalStepSize.toDouble }
+        .map { case (start, end) =>
+          (end.toDouble - start.toDouble) / intervalStepSize.toDouble
+        }
 
       val intervalList = interval.zip(stepSizes).flatMap { case (i, step) =>
         List.fill(intervalStepSize)(i)
           .zipWithIndex
-          .map { case (int, index) => int + (index * step)}
+          .map { case (int, index) => int + (index * step) }
       }
 
       val finalList = (intervalList :+ (stepSizes.last + intervalList.last)).zipWithIndex
@@ -97,8 +101,5 @@ object ElasticityTestValidation {
       Queue(finalList: _*)
     }
   }
-
-
-  def invalidE[A](msg: String): EValidated[A] = invalid(List(msg))
 
 }

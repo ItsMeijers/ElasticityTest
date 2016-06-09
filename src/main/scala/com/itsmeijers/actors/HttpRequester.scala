@@ -50,7 +50,6 @@ class HttpRequester(
 
   def receive = {
     case request: HttpRequest =>
-      log.debug(s"Sending request ${request.uri}")
       // Make a single httprequest from the scheduler and pipe the result to the persister
       val connectionFlow: Flow[HttpRequest, HttpResponse, Future[Http.OutgoingConnection]] =
         Http(context.system).outgoingConnection(
@@ -61,7 +60,11 @@ class HttpRequester(
       val responseFuture = Source.single(request)
         .via(connectionFlow)
         .runWith(Sink.head)
-        .map(HttpResult(request.uri.toString, startTime, _))
+        .map(HttpResult(
+          request.uri.toString,
+          startTime,
+          System.currentTimeMillis().toString,
+          _))
 
       responseFuture pipeTo persister
   }
@@ -77,6 +80,6 @@ object HttpRequester {
       Props(classOf[HttpRequester], elasticityTest, httpRequest, interval, intervalCounter)
 
   sealed trait HttpRequesterMessage
-  case class HttpResult(uri: String, startTime: String, httpResponse: HttpResponse)
+  case class HttpResult(uri: String, startTime: String, endTime: String, httpResponse: HttpResponse)
 
 }

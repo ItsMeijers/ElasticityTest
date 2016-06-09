@@ -5,12 +5,13 @@ import akka.pattern.{ask, pipe}
 import akka.util.Timeout
 import scala.concurrent.duration._
 import scala.concurrent.ExecutionContext.Implicits.global
-import scala.concurrent.Future
+import scala.concurrent.{Future, Await}
 import com.itsmeijers.actors.ResultAggregator.AggregatingFinished
-import com.itsmeijers.actors.RequestScheduler.{ScheduleStopped, CurrentPercentage}
+import com.itsmeijers.actors.RequestScheduler.{ScheduleStopped, TimeLeft}
 import com.itsmeijers.actors.HistoryResultRetriever.HistoryResultRetrieverMessage
 import com.itsmeijers.models._
 import com.itsmeijers.models.ChartModels._
+import com.itsmeijers.models.SocketModels._
 import ElasticityTester._
 import com.itsmeijers.utils.{JsonSupport, FileSaving}
 import java.io.PrintWriter
@@ -23,21 +24,28 @@ class ElasticityTester
   with FileSaving {
 
   // Setting initial state: Idle and initial data: Uninitialized
-  startWith(Idle, Uninitialized)
-
-  // Actor for interpreting the DSL
-  //val interpreter = context.actorOf(Interpreter.props, "interpreter")
+  startWith(Idle, Uninitialized(None))
 
   // Actor for retrieving the history of elasticityTests
   val historyRetriever = context.actorOf(HistoryResultRetriever.props, "historyResultRetriever")
 
   implicit val askTimeout = Timeout(5 seconds)
 
+  def totalDuration(et: ElasticityTest): Int =
+    (et.totalDuration.toString.takeWhile(_ != ' ').toInt * 60) + 60 // (for saving and aggregating!)
+
   // Processing messages when Idle
   when(Idle) {
     case Event(IsAvailable, data) =>
       stay() using(data) replying(CurrentlyAvailable)
-    case Event(test: Test, Uninitialized) =>
+    case Event(UpdateSocket(testName), Uninitialized(previousTest)) =>
+      val status = previousTest.flatMap { name =>
+        if(name == testName) Some(completedStatus)
+        else None
+      } getOrElse(negativeStatus("Currently not running any tests!"))
+
+      stay() using(Uninitialized(previousTest)) replying(SocketStatus(status))
+    case Event(test: Test, Uninitialized(_)) =>
       log.debug("Received Test data switch to Requesting State")
       val et = test.elasticityTest
 
@@ -52,13 +60,21 @@ class ElasticityTester
   when(Requesting) {
     case Event(IsAvailable, data) =>
       stay() using(data) replying(CurrentlyRequesting)
-    case Event(UpdateSocket, testData: TestData) =>
-      // Request current percentage from the RequestScheduler
-      val testPercentage = (testData.requestScheduler ? CurrentPercentage)
-          .mapTo[Double]
-          .map(TestPercentage.apply)
+    case Event(UpdateSocket(testName), testData: TestData) =>
+      val currentTest = testData.elasticityTest.name
+      val response = if(testName == currentTest) {
+        // Request current percentage from the RequestScheduler
+        // (testData.requestScheduler ? TimeLeft)
+        //   .mapTo[Double]
+        //   .map(timeLeft => SocketStatus(postiveStatus(timeLeft, "Requesting")))
+        SocketStatus(postiveStatus(totalDuration(testData.elasticityTest), "Requesting"))
+      } else {
+          SocketStatus(negativeStatus(s"Requested test is not running, currently running $currentTest"))
+      }
+      // use pipeTo pattern -- ugly fix
+      // val response = Await.result(responseF, 4 seconds)
 
-      stay() replying(testPercentage)
+      stay() using(testData) replying(response)
     case Event(scheduleStopped: ScheduleStopped, testData: TestData) =>
       val et = testData.elasticityTest
       // Create the resultAggregator which starts aggregating immediatly based
@@ -73,8 +89,15 @@ class ElasticityTester
   when(Aggregating) {
     case Event(IsAvailable, data) =>
       stay() using(data) replying(CurrentlyAggregating)
-    case Event(UpdateSocket, data) =>
-      stay() using(data) replying(CurrentlyAggregating)
+    case Event(UpdateSocket(testName), ad: AggregateData) =>
+      val currentTest = ad.elasticityTest.name
+
+      val response = if(testName == currentTest)
+        SocketStatus(postiveStatus(totalDuration(ad.elasticityTest), "Aggregating"))
+      else
+        SocketStatus(negativeStatus(s"Currently not aggregating for $testName, but for $currentTest"))
+
+      stay() using(ad) replying(response)
     case Event(AggregatingFinished(uriWithIntervalResults), data: AggregateData) =>
       goto(Saving) using SaveData(data.elasticityTest, uriWithIntervalResults)
   }
@@ -82,11 +105,17 @@ class ElasticityTester
   when(Saving) {
     case Event(IsAvailable, data) =>
       stay() using(data) replying(CurrentlySaving)
-    case Event(UpdateSocket, data) =>
-      stay() using(data) replying(CurrentlySaving)
-    case Event((elasticityTestResult, saved), data) =>
+    case Event(UpdateSocket(testName), sd: SaveData) =>
+      val currentTest = sd.elasticityTest.name
+
+      val response = if (testName == currentTest)
+        SocketStatus(postiveStatus(totalDuration(sd.elasticityTest), "Saving"))
+      else SocketStatus(negativeStatus(s"Currently not saving for $testName, but for $currentTest"))
+
+      stay() using(sd) replying(response)
+    case Event((elasticityTestResult, saved), sd: SaveData) =>
       log.debug(s"Received saved: $elasticityTestResult with saved: $saved")
-      goto(Idle) using Uninitialized
+      goto(Idle) using Uninitialized(Some(sd.elasticityTest.name))
   }
 
   // Processing messages when they are not handled in the Requesting or Idle state
@@ -139,22 +168,11 @@ class ElasticityTester
       .groupBy(_._1)
       .map{case (key, value) => key -> value.map(_._2).sum}
       .foldRight(Seq[Row]()){(curr, acc) =>
-        acc :+ Row(Seq(StringValue(curr._1.toString), IntValue(curr._2)))
+        acc :+ Row(Seq(StringValue(curr._1.toString), NumberValue(curr._2)))
       }
 
     Data(columns, rows)
   }
-
-  // {"cols" : [
-  //   {id:'URI', label:'URI', type: 'string'},
-  //   {id:'OK', label:'OK', type: 'number'},
-  //   {id:'BadRequest', label:'BadRequest', type: 'number'},
-  //   {id:'NotFound', label:'NotFound', type: 'number'}
-  // ], "rows": [
-  //   {c: [{v: "/load?cpu=30"}, {v: 1000}, {v: 400}, {v: 200}]},
-  //   {c: [{v: "/load?cpu=50"}, {v: 1170}, {v: 460}, {v: 250}]},
-  //   {c: [{v: "/load?cpu=70"}, {v: 660}, {v: 1120}, {v: 300}]}
-  // ]};
 
   def calculateBarChartData(uwi: Seq[(String, Seq[IntervalRouteResult])]) = {
     val firstCol = Column("URI", "string", Some("URI"), None)
@@ -169,8 +187,8 @@ class ElasticityTester
 
     val columns = firstCol +: restCol
 
-    def getIntValues(status: Int, iResults: Seq[IntervalRouteResult]): IntValue =
-      IntValue(
+    def getNumberValues(status: Int, iResults: Seq[IntervalRouteResult]): NumberValue =
+      NumberValue(
         iResults
           .flatMap(_.singleStatusResults)
           .filter(_.status == status)
@@ -181,13 +199,64 @@ class ElasticityTester
     val rows = uwi.map { case (uri, iResults) =>
       val c = columns.map {
         case Column("URI", _, _, _) => StringValue(uri)
-        case col: Column => getIntValues(col.id.toInt, iResults)
+        case col: Column => getNumberValues(col.id.toInt, iResults)
       }
       Row(c)
     }
 
-
     Data(columns, rows)
+  }
+
+  def calculateLineChartUris(uriWithIntervals: Seq[(String, Seq[IntervalRouteResult])]): Seq[UriData] = {
+    val cols = Seq(
+      Column("time", "number", Some("Time (minutes)"), None),
+      Column("responseTime", "number", Some("Response Time (ms)"), None),
+      Column("min", "number", None, Some("interval")),
+      Column("max", "number", None, Some("interval")))
+
+    uriWithIntervals.map { case (uri, intervalRouteResults) =>
+      val rows = intervalRouteResults
+        .sortBy(_.interval)
+        .map { ir =>
+          val (min, max) = ir.singleStatusResults.foldRight((0.0, 0.0)){ (ssr, acc) =>
+            val newMin = if(ssr.minResponseTime > acc._1) ssr.minResponseTime
+              else acc._1
+            val newMax = if(ssr.maxResponseTime > acc._2) ssr.maxResponseTime
+              else acc._2
+            (newMin, newMax)
+          }
+
+          Row(Seq(
+            NumberValue(ir.interval),
+            NumberValue(ir.averageResponseTime),
+            NumberValue(min),
+            NumberValue(max)
+          ))
+        }
+      UriData(cols, rows, uri)
+    }
+  }
+
+  def calculateInstancesChart(uriWithIntervals: Seq[(String, Seq[IntervalRouteResult])]): Data = {
+    val cols = Seq(
+      Column("time", "number", Some("Time (minutes)"), None),
+      Column("responseTime", "number", Some("Average Response Time (milliseconds)"), None),
+      Column("serverInstances", "number", Some("Server Instances"), None)
+    )
+
+    val rows = uriWithIntervals
+      .flatMap(_._2) // extract intervalRouteResults
+      .groupBy(_.interval)
+      .map { case (interval, routeResults) =>
+        val average = routeResults.map(_.averageResponseTime).sum / routeResults.length
+        Row(Seq(NumberValue(interval), NumberValue(average), NumberValue(1))) // MAKE SURE TO ADD Server Instances
+      }.toSeq
+      .sortBy(_.c.head match {
+        case StringValue(v) => 0.0
+        case NumberValue(v) => v
+      })
+
+    Data(cols, rows)
   }
 
   def calculateAndSaveData(
@@ -205,7 +274,9 @@ class ElasticityTester
           negativeResults = 10, // TODO
           routeResults = intervalRouteResults,
           pieChartData = calculatePieChartData(uriWithIntervalResults),
-          barChartData = calculateBarChartData(uriWithIntervalResults)
+          barChartData = calculateBarChartData(uriWithIntervalResults),
+          lineChartUris = calculateLineChartUris(uriWithIntervalResults),
+          responseInstancesChart = calculateInstancesChart(uriWithIntervalResults)
         )
 
         val json = elasticityTestResult.toJson
@@ -220,10 +291,10 @@ class ElasticityTester
           writer.write(jsonString)
           writer.close()
           elasticityTestResult -> true
-        } else elasticityTestResult -> false
-
+        }
+        else
+          elasticityTestResult -> false
       }
-
 }
 
 object ElasticityTester {
@@ -232,9 +303,14 @@ object ElasticityTester {
   sealed trait ElasticityTesterMessage
   case class Test(elasticityTest: ElasticityTest) extends ElasticityTesterMessage
   case object IsAvailable extends ElasticityTesterMessage
-  case object UpdateSocket extends ElasticityTesterMessage
-  final case class TestPercentage(percentage: Double) extends ElasticityTesterMessage
+  case class LifecycleEvent(lifecycleHook: LifecycleHook, receiveTime: String) extends ElasticityTesterMessage
 
+  // Messages for updating the socket
+  sealed trait SocketMessage
+  case class UpdateSocket(testName: String) extends SocketMessage
+  case class SocketStatus(currentStatus: CurrentStatus) extends SocketMessage
+
+  // Messages for the status when a new elasticitytest gets created
   sealed trait ElasticityTestStatus
   case object CurrentlyAggregating extends ElasticityTestStatus
   case object CurrentlySaving extends ElasticityTestStatus
@@ -250,7 +326,7 @@ object ElasticityTester {
 
   // Data objects for testing an ElasticityTest
   sealed trait ElasticityData
-  case object Uninitialized extends ElasticityData
+  case class Uninitialized(previousTest: Option[String]) extends ElasticityData
 
   // For loading the testData with the the RequestScheduler ActorRef
   final case class TestData(

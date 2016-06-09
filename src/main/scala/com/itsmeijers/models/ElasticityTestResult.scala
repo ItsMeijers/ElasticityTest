@@ -1,6 +1,7 @@
 package com.itsmeijers.models
 
 import com.itsmeijers.models.ChartModels.Data
+import com.itsmeijers.models.ChartModels.UriData
 
 case class ElasticityTestResult(
   name: String,
@@ -12,4 +13,6 @@ case class ElasticityTestResult(
   negativeResults: Int,
   routeResults: Seq[IntervalRouteResult],
   pieChartData: Data,
-  barChartData: Data)
+  barChartData: Data,
+  lineChartUris: Seq[UriData],
+  responseInstancesChart: Data)
